@@ -12,7 +12,7 @@ const App = () => {
 
   // Handle Socket.IO for real-time audio sharing and state syncing
   useEffect(() => {
-    const newSocket = io('http://localhost:3001', { transports: ['websocket'] });
+    const newSocket = io('https://your-heroku-app-name.herokuapp.com', { transports: ['websocket'] });
     newSocket.on('connect', () => console.log('Socket.IO connected'));
     newSocket.on('message', (data) => {
       console.log('Received message:', data);
