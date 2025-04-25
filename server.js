@@ -6,19 +6,31 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  pingTimeout: 60000, // 60 seconds
-  pingInterval: 25000 // 25 seconds
+  cors: {
+    origin: "*", // Allow all origins for testing
+    methods: ["GET", "POST"]
+  },
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
+    skipMiddlewares: true
+  }
 });
 
-// Serve React build files
+// Serve static files
 app.use(express.static(path.join(__dirname, 'build')));
 
-// Socket.IO logic
+// Socket.IO connection handler
 io.on('connection', (socket) => {
-  console.log('New client connected');
-  
-  socket.on('message', (data) => {
-    io.emit('message', data); // Broadcast to all
+  console.log('New client connected:', socket.id);
+
+  socket.on('number-added', (data) => {
+    // Broadcast to all clients including sender
+    io.emit('number-update', data);
+    console.log('Broadcasting number:', data);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
   });
 });
 
