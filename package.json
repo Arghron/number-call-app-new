@@ -14,10 +14,10 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "node server.js",  // Your Socket.IO server entry point
+    "start": "node server.js",
     "build": "react-scripts build",
     "heroku-postbuild": "npm run build"
-  }
+  },  // <-- THIS COMMA WAS MISSING
   "eslintConfig": {
     "extends": [
       "react-app",
