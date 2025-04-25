@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
+import { io } from 'socket.io-client';
 
 const App = () => {
   const [input, setInput] = useState('');
@@ -7,19 +8,33 @@ const App = () => {
   const [overrideNumbers, setOverrideNumbers] = useState([]);
   const [checkDateNumbers, setCheckDateNumbers] = useState([]);
   const [intervalMinutes, setIntervalMinutes] = useState(5);
-  const [ws, setWs] = useState(null);
-  const audioContextRef = useRef(new AudioContext());
+  const [socket, setSocket] = useState(null);
 
-  // Handle WebSocket for real-time audio sharing
+  // Handle Socket.IO for real-time audio sharing and state syncing
   useEffect(() => {
-    const socket = new WebSocket('wss://echo.websocket.org'); // Replace with your WebSocket server
-    socket.onopen = () => console.log('WebSocket connected');
-    socket.onmessage = (event) => {
-      const { text } = JSON.parse(event.data);
-      speak(text);
-    };
-    setWs(socket);
-    return () => socket.close();
+    const newSocket = io('http://localhost:3001', { transports: ['websocket'] });
+    newSocket.on('connect', () => console.log('Socket.IO connected'));
+    newSocket.on('message', (data) => {
+      console.log('Received message:', data);
+      const { type, text, category, number } = data;
+      if (type === 'number-added') {
+        speak(text);
+        if (category === 'DRS') {
+          setDrsNumbers((prev) => {
+            console.log('Updating DRS numbers:', [...prev, number]);
+            return [...prev, number];
+          });
+        } else if (category === 'Override') {
+          setOverrideNumbers((prev) => [...prev, number]);
+        } else if (category === 'Check Date') {
+          setCheckDateNumbers((prev) => [...prev, number]);
+        }
+      } else if (type === 'repeat') {
+        speak(text);
+      }
+    });
+    setSocket(newSocket);
+    return () => newSocket.disconnect();
   }, []);
 
   // Handle keyboard input
@@ -41,16 +56,16 @@ const App = () => {
         `Override: ${overrideNumbers.join(', ') || 'none'}`,
         `Check Date: ${checkDateNumbers.join(', ') || 'none'}`
       ].join('. ');
-      speak(text);
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ text }));
+      if (socket) {
+        socket.emit('message', { type: 'repeat', text });
       }
     }, intervalMinutes * 60 * 1000);
     return () => clearInterval(interval);
-  }, [drsNumbers, overrideNumbers, checkDateNumbers, intervalMinutes, ws]);
+  }, [drsNumbers, overrideNumbers, checkDateNumbers, intervalMinutes, socket]);
 
   // Text-to-speech function
   const speak = (text) => {
+    console.log('Speaking:', text);
     const utterance = new SpeechSynthesisUtterance(text);
     window.speechSynthesis.speak(utterance);
   };
@@ -59,16 +74,9 @@ const App = () => {
   const handleButtonClick = (category) => {
     if (!input) return;
     const text = `${category} ${input}`;
-    speak(text);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ text }));
-    }
-    if (category === 'DRS') {
-      setDrsNumbers((prev) => [...prev, input]);
-    } else if (category === 'Override') {
-      setOverrideNumbers((prev) => [...prev, input]);
-    } else if (category === 'Check Date') {
-      setCheckDateNumbers((prev) => [...prev, input]);
+    if (socket) {
+      console.log('Sending message:', { type: 'number-added', text, category, number: input });
+      socket.emit('message', { type: 'number-added', text, category, number: input });
     }
     setInput('');
   };
@@ -97,6 +105,12 @@ const App = () => {
         />
         <div className="mt-2 space-x-2">
           <button
+            onClick={() => speak('Manual test')}
+            className="bg-gray-500 text-white p-2 rounded hover:bg-gray-600"
+          >
+            Test Audio
+          </button>
+          <button
             onClick={() => handleButtonClick('DRS')}
             className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
           >
@@ -104,13 +118,13 @@ const App = () => {
           </button>
           <button
             onClick={() => handleButtonClick('Override')}
-            className="bg-green-500 text-white p-2 rounded hover:bg-green-600"
+            className="bg-green-500 text-white p-2 rounded hover:bg-blue-600"
           >
             Override
           </button>
           <button
             onClick={() => handleButtonClick('Check Date')}
-            className="bg-yellow-500 text-white p-2 rounded hover:bg-yellow-600"
+            className="bg-yellow-500 text-white p-2 rounded hover:bg-blue-600"
           >
             Check Date
           </button>
@@ -130,6 +144,7 @@ const App = () => {
         <div>
           <h2 className="text-xl font-semibold">DRS</h2>
           <ul className="mt-2">
+            {console.log('Rendering DRS numbers:', drsNumbers)}
             {drsNumbers.map((num, index) => (
               <li key={index} className="flex items-center py-1">
                 <span>{num}</span>
