@@ -12,7 +12,10 @@ const App = () => {
 
   // Handle Socket.IO for real-time audio sharing and state syncing
   useEffect(() => {
-    const newSocket = io('https://salty-peak-76540.herokuapp.com/', { transports: ['websocket'] });
+    const newSocket = io(window.location.origin, { 
+      transports: ['websocket'],
+      reconnection: true
+    });
     newSocket.on('connect', () => console.log('Socket.IO connected'));
     newSocket.on('message', (data) => {
       console.log('Received message:', data);
