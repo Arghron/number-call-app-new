@@ -189,7 +189,12 @@ const App = () => {
       'Check Date': setCheckDateNumbers
     };
 
-    const number = updaters[category](prev => prev.filter((_, i) => i !== index))[index];
+    let number;
+    updaters[category](prev => {
+      number = prev[index]; // Store the number before filtering
+      return prev.filter((_, i) => i !== index);
+    });
+
     const uniqueKey = `${category}-${number}`;
     setAnnouncedNumbers(prev => {
       const newSet = new Set(prev);
@@ -224,7 +229,7 @@ const App = () => {
             {muted ? 'Unmute' : 'Mute'}
           </button>
           <button
-            onClickGIF => handleButtonClick('DRS')}
+            onClick={() => handleButtonClick('DRS')}
             className="bg-blue-500 text-white p-3 rounded hover:bg-blue-600 text-xl"
           >
             DRS
