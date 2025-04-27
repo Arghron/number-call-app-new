@@ -7,32 +7,48 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins for testing
+    origin: "*",
     methods: ["GET", "POST"]
   },
   connectionStateRecovery: {
-    maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
-    skipMiddlewares: true
+    maxDisconnectionDuration: 120000
   }
 });
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'build')));
+// Store numbers on the server
+const numbers = {
+  DKS: [],
+  Override: [],
+  'Check Date': []
+};
 
-// Socket.IO connection handler
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
+  // Send current numbers to the new client
+  socket.emit('initial-state', numbers);
+
   socket.on('number-added', (data) => {
-    // Broadcast to all clients including sender
+    // Add to server-side storage
+    numbers[data.category].push(data.number);
+    // Broadcast to all clients
     io.emit('number-update', data);
-    console.log('Broadcasting number:', data);
+    console.log('Broadcasting:', data);
+  });
+
+  socket.on('number-deleted', (data) => {
+    // Remove from server-side storage
+    numbers[data.category].splice(data.index, 1);
+    // Broadcast deletion to all clients
+    io.emit('number-deleted', data);
   });
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
 });
+
+app.use(express.static(path.join(__dirname, 'build')));
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

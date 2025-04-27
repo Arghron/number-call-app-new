@@ -1,41 +1,46 @@
 import React, { useState, useEffect } from 'react';
-import './App.css';
 import { io } from 'socket.io-client';
+import './App.css';
 
 const App = () => {
   const [input, setInput] = useState('');
-  const [drsNumbers, setDrsNumbers] = useState([]);
+  const [dksNumbers, setDksNumbers] = useState([]);
   const [overrideNumbers, setOverrideNumbers] = useState([]);
   const [checkDateNumbers, setCheckDateNumbers] = useState([]);
   const [intervalMinutes, setIntervalMinutes] = useState(5);
   const [socket, setSocket] = useState(null);
 
-  // Initialize Socket.IO connection with better configuration
+  // Initialize Socket.IO connection
   useEffect(() => {
-    const newSocket = io(window.location.origin, { 
+    const newSocket = io(window.location.origin, {
       transports: ['websocket'],
       reconnection: true,
-      reconnectionAttempts: Infinity,
+      reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       timeout: 20000
     });
 
     newSocket.on('connect', () => {
-      console.log('Socket.IO connected:', newSocket.id);
+      console.log('Connected to server with ID:', newSocket.id);
     });
 
     newSocket.on('connect_error', (err) => {
       console.error('Connection error:', err.message);
     });
 
-    // Updated message handler for number updates
+    // Handle initial state
+    newSocket.on('initial-state', (data) => {
+      console.log('Received initial state:', data);
+      setDksNumbers(data.DKS);
+      setOverrideNumbers(data.Override);
+      setCheckDateNumbers(data['Check Date']);
+    });
+
     newSocket.on('number-update', (data) => {
       console.log('Received update:', data);
-      speak(data.text);
-      
       switch(data.category) {
-        case 'DRS':
-          setDrsNumbers(prev => [...prev, data.number]);
+        case 'DKS':
+          setDksNumbers(prev => [...prev, data.number]);
           break;
         case 'Override':
           setOverrideNumbers(prev => [...prev, data.number]);
@@ -44,6 +49,24 @@ const App = () => {
           setCheckDateNumbers(prev => [...prev, data.number]);
           break;
         default:
+          console.log('Unknown category:', data.category);
+          break;
+      }
+      speak(data.text);
+    });
+
+    // Handle deletions from other clients
+    newSocket.on('number-deleted', (data) => {
+      console.log('Received deletion:', data);
+      switch(data.category) {
+        case 'DKS':
+          setDksNumbers(prev => prev.filter((_, i) => i !== data.index));
+          break;
+        case 'Override':
+          setOverrideNumbers(prev => prev.filter((_, i) => i !== data.index));
+          break;
+        case 'Check Date':
+          setCheckDateNumbers(prev => prev.filter((_, i) => i !== data.index));
           break;
       }
     });
@@ -51,7 +74,6 @@ const App = () => {
     setSocket(newSocket);
 
     return () => {
-      newSocket.off('number-update');
       newSocket.disconnect();
     };
   }, []);
@@ -65,86 +87,106 @@ const App = () => {
         setInput(prev => prev.slice(0, -1));
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Handle repeated calls
+  // Handle repeated announcements
   useEffect(() => {
     const interval = setInterval(() => {
       const text = [
-        `DRS: ${drsNumbers.join(', ') || 'none'}`,
+        `DKS: ${dksNumbers.join(', ') || 'none'}`,
         `Override: ${overrideNumbers.join(', ') || 'none'}`,
         `Check Date: ${checkDateNumbers.join(', ') || 'none'}`
       ].join('. ');
-      
+
       if (socket) {
         socket.emit('repeat-message', { text });
       }
       speak(text);
     }, intervalMinutes * 60 * 1000);
-    
+
     return () => clearInterval(interval);
-  }, [drsNumbers, overrideNumbers, checkDateNumbers, intervalMinutes, socket]);
+  }, [dksNumbers, overrideNumbers, checkDateNumbers, intervalMinutes, socket]);
 
   // Text-to-speech function
   const speak = (text) => {
-    if (!text) return;
-    console.log('Speaking:', text);
+    if (!text || !('speechSynthesis' in window)) {
+      console.log('Speech synthesis not supported or no text provided');
+      return;
+    }
+
     const utterance = new SpeechSynthesisUtterance(text);
+    utterance.volume = 1;
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    utterance.onend = () => console.log('Speech finished');
+    utterance.onerror = (event) => console.log('Speech error:', event.error);
+
+    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   };
 
-  // Handle button clicks - updated to match server event names
+  // Handle button clicks
   const handleButtonClick = (category) => {
-    if (!input) return;
+    if (!input.trim()) return;
+
     const text = `${category} ${input}`;
-    
+    const data = {
+      category,
+      number: input,
+      text
+    };
+
     if (socket) {
-      socket.emit('number-added', {
-        category,
-        number: input,
-        text
-      });
+      socket.emit('number-added', data);
     }
-    
+
     setInput('');
   };
 
   // Handle number deletion
   const deleteNumber = (category, index) => {
-    const updateState = {
-      'DRS': setDrsNumbers,
+    const updaters = {
+      'DKS': setDksNumbers,
       'Override': setOverrideNumbers,
       'Check Date': setCheckDateNumbers
     };
-    
-    updateState[category](prev => prev.filter((_, i) => i !== index));
+
+    updaters[category](prev => prev.filter((_, i) => i !== index));
+
+    if (socket) {
+      socket.emit('number-deleted', { category, index });
+    }
   };
 
   return (
     <div className="container mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4">Number Call App</h1>
+
       <div className="mb-4">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value.replace(/\D/g, ''))}
-          className="border p-2 mr-2 rounded"
+          className="border p-2 mr-2 rounded w-64"
           placeholder="Type numbers..."
         />
+
         <div className="mt-2 space-x-2">
           <button
-            onClick={() => speak('Manual test')}
+            onClick={() => speak('Audio test successful')}
             className="bg-gray-500 text-white p-2 rounded hover:bg-gray-600"
           >
             Test Audio
           </button>
           <button
-            onClick={() => handleButtonClick('DRS')}
+            onClick={() => handleButtonClick('DKS')}
             className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
           >
-            DRS
+            DKS
           </button>
           <button
             onClick={() => handleButtonClick('Override')}
@@ -160,26 +202,28 @@ const App = () => {
           </button>
         </div>
       </div>
+
       <div className="mb-4">
         <label className="mr-2 font-medium">Repeat interval (minutes):</label>
         <input
           type="number"
           value={intervalMinutes}
-          onChange={(e) => setIntervalMinutes(Number(e.target.value))}
+          onChange={(e) => setIntervalMinutes(Math.max(1, Number(e.target.value)))}
           min="1"
-          className="border p-2 rounded"
+          className="border p-2 rounded w-20"
         />
       </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
-          <h2 className="text-xl font-semibold">DRS</h2>
+          <h2 className="text-xl font-semibold">DKS</h2>
           <ul className="mt-2">
-            {drsNumbers.map((num, index) => (
+            {dksNumbers.map((num, index) => (
               <li key={index} className="flex items-center py-1">
-                <span>{num}</span>
+                <span className="mr-2">{num}</span>
                 <button
-                  onClick={() => deleteNumber('DRS', index)}
-                  className="ml-2 text-red-500 hover:text-red-700"
+                  onClick={() => deleteNumber('DKS', index)}
+                  className="text-red-500 hover:text-red-700"
                 >
                   ✕
                 </button>
@@ -187,7 +231,40 @@ const App = () => {
             ))}
           </ul>
         </div>
-        {/* Other number lists remain the same */}
+
+        <div>
+          <h2 className="text-xl font-semibold">Override</h2>
+          <ul className="mt-2">
+            {overrideNumbers.map((num, index) => (
+              <li key={index} className="flex items-center py-1">
+                <span className="mr-2">{num}</span>
+                <button
+                  onClick={() => deleteNumber('Override', index)}
+                  className="text-red-500 hover:text-red-700"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <h2 className="text-xl font-semibold">Check Date</h2>
+          <ul className="mt-2">
+            {checkDateNumbers.map((num, index) => (
+              <li key={index} className="flex items-center py-1">
+                <span className="mr-2">{num}</span>
+                <button
+                  onClick={() => deleteNumber('Check Date', index)}
+                  className="text-red-500 hover:text-red-700"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
     </div>
   );
