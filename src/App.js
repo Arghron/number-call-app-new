@@ -16,11 +16,12 @@ const App = () => {
   // Initialize Socket.IO connection
   useEffect(() => {
     const newSocket = io(window.location.origin, {
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      timeout: 20000
+     path: '/socket.io',
+     transports: ['websocket'],
+     reconnection: true,
+     reconnectionAttempts: 5,
+     reconnectionDelay: 1000,
+     timeout: 20000
     });
 
     newSocket.on('connect', () => {
