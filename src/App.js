@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import './App.css';
 
 const App = () => {
   const [input, setInput] = useState('');
-  const [dksNumbers, setDksNumbers] = useState([]);
+  const [drsNumbers, setDrsNumbers] = useState([]);
   const [overrideNumbers, setOverrideNumbers] = useState([]);
   const [checkDateNumbers, setCheckDateNumbers] = useState([]);
   const [intervalMinutes, setIntervalMinutes] = useState(5);
   const [socket, setSocket] = useState(null);
+  const [muted, setMuted] = useState(true); // Mute by default
+  const [announcedNumbers, setAnnouncedNumbers] = useState(new Set()); // Track announced numbers
+  const inputRef = useRef(null); // Ref for input field
 
   // Initialize Socket.IO connection
   useEffect(() => {
@@ -31,16 +34,16 @@ const App = () => {
     // Handle initial state
     newSocket.on('initial-state', (data) => {
       console.log('Received initial state:', data);
-      setDksNumbers(data.DKS);
-      setOverrideNumbers(data.Override);
-      setCheckDateNumbers(data['Check Date']);
+      setDrsNumbers(data.DRS || []);
+      setOverrideNumbers(data.Override || []);
+      setCheckDateNumbers(data['Check Date'] || []);
     });
 
     newSocket.on('number-update', (data) => {
       console.log('Received update:', data);
       switch(data.category) {
-        case 'DKS':
-          setDksNumbers(prev => [...prev, data.number]);
+        case 'DRS':
+          setDrsNumbers(prev => [...prev, data.number]);
           break;
         case 'Override':
           setOverrideNumbers(prev => [...prev, data.number]);
@@ -52,15 +55,20 @@ const App = () => {
           console.log('Unknown category:', data.category);
           break;
       }
-      speak(data.text);
+      // Only speak if not muted and not previously announced
+      const uniqueKey = `${data.category}-${data.number}`;
+      if (!muted && !announcedNumbers.has(uniqueKey)) {
+        speak(data.text);
+        setAnnouncedNumbers(prev => new Set(prev).add(uniqueKey));
+      }
     });
 
     // Handle deletions from other clients
     newSocket.on('number-deleted', (data) => {
       console.log('Received deletion:', data);
       switch(data.category) {
-        case 'DKS':
-          setDksNumbers(prev => prev.filter((_, i) => i !== data.index));
+        case 'DRS':
+          setDrsNumbers(prev => prev.filter((_, i) => i !== data.index));
           break;
         case 'Override':
           setOverrideNumbers(prev => prev.filter((_, i) => i !== data.index));
@@ -69,6 +77,13 @@ const App = () => {
           setCheckDateNumbers(prev => prev.filter((_, i) => i !== data.index));
           break;
       }
+      // Remove from announced numbers
+      const uniqueKey = `${data.category}-${data.number}`;
+      setAnnouncedNumbers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(uniqueKey);
+        return newSet;
+      });
     });
 
     setSocket(newSocket);
@@ -76,7 +91,7 @@ const App = () => {
     return () => {
       newSocket.disconnect();
     };
-  }, []);
+  }, [muted, announcedNumbers]);
 
   // Handle keyboard input
   useEffect(() => {
@@ -95,20 +110,25 @@ const App = () => {
   // Handle repeated announcements
   useEffect(() => {
     const interval = setInterval(() => {
-      const text = [
-        `DKS: ${dksNumbers.join(', ') || 'none'}`,
-        `Override: ${overrideNumbers.join(', ') || 'none'}`,
-        `Check Date: ${checkDateNumbers.join(', ') || 'none'}`
-      ].join('. ');
+      // Only include categories with numbers in the announcement
+      const announcements = [];
+      if (drsNumbers.length > 0) announcements.push(`DRS: ${drsNumbers.join(', ')}`);
+      if (overrideNumbers.length > 0) announcements.push(`Override: ${overrideNumbers.join(', ')}`);
+      if (checkDateNumbers.length > 0) announcements.push(`Check Date: ${checkDateNumbers.join(', ')}`);
+
+      const text = announcements.join('. ');
+      if (!text) return; // Skip if there are no numbers to announce
 
       if (socket) {
         socket.emit('repeat-message', { text });
       }
-      speak(text);
+      if (!muted) {
+        speak(text);
+      }
     }, intervalMinutes * 60 * 1000);
 
     return () => clearInterval(interval);
-  }, [dksNumbers, overrideNumbers, checkDateNumbers, intervalMinutes, socket]);
+  }, [drsNumbers, overrideNumbers, checkDateNumbers, intervalMinutes, socket, muted]);
 
   // Text-to-speech function
   const speak = (text) => {
@@ -121,6 +141,15 @@ const App = () => {
     utterance.volume = 1;
     utterance.rate = 1;
     utterance.pitch = 1;
+
+    // Attempt to use Cantonese (zh-HK)
+    const voices = window.speechSynthesis.getVoices();
+    const cantoneseVoice = voices.find(voice => voice.lang === 'zh-HK');
+    if (cantoneseVoice) {
+      utterance.voice = cantoneseVoice;
+    } else {
+      console.log('Cantonese voice not available, falling back to default');
+    }
 
     utterance.onend = () => console.log('Speech finished');
     utterance.onerror = (event) => console.log('Speech error:', event.error);
@@ -145,17 +174,25 @@ const App = () => {
     }
 
     setInput('');
+    // Auto-focus the input field
+    inputRef.current.focus();
   };
 
   // Handle number deletion
   const deleteNumber = (category, index) => {
     const updaters = {
-      'DKS': setDksNumbers,
+      'DRS': setDrsNumbers,
       'Override': setOverrideNumbers,
       'Check Date': setCheckDateNumbers
     };
 
-    updaters[category](prev => prev.filter((_, i) => i !== index));
+    const number = updaters[category](prev => prev.filter((_, i) => i !== index))[index];
+    const uniqueKey = `${category}-${number}`;
+    setAnnouncedNumbers(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(uniqueKey);
+      return newSet;
+    });
 
     if (socket) {
       socket.emit('number-deleted', { category, index });
@@ -163,67 +200,68 @@ const App = () => {
   };
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Number Call App</h1>
+    <div className="container mx-auto p-4 text-lg">
+      <h1 className="text-4xl font-bold mb-6">Number Call App</h1>
 
-      <div className="mb-4">
+      <div className="mb-6">
         <input
+          ref={inputRef}
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value.replace(/\D/g, ''))}
-          className="border p-2 mr-2 rounded w-64"
+          className="border p-3 mr-3 rounded w-64 text-xl"
           placeholder="Type numbers..."
         />
 
-        <div className="mt-2 space-x-2">
+        <div className="mt-3 space-x-3">
           <button
-            onClick={() => speak('Audio test successful')}
-            className="bg-gray-500 text-white p-2 rounded hover:bg-gray-600"
+            onClick={() => setMuted(!muted)}
+            className={`p-3 rounded text-white text-xl ${muted ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'}`}
           >
-            Test Audio
+            {muted ? 'Unmute' : 'Mute'}
           </button>
           <button
-            onClick={() => handleButtonClick('DKS')}
-            className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
+            onClick={() => handleButtonClick('DRS')}
+            className="bg-blue-500 text-white p-3 rounded hover:bg-blue-600 text-xl"
           >
-            DKS
+            DRS
           </button>
           <button
             onClick={() => handleButtonClick('Override')}
-            className="bg-green-500 text-white p-2 rounded hover:bg-green-600"
+            className="bg-green-500 text-white p-3 rounded hover:bg-green-600 text-xl"
           >
             Override
           </button>
           <button
             onClick={() => handleButtonClick('Check Date')}
-            className="bg-yellow-500 text-white p-2 rounded hover:bg-yellow-600"
+            className="bg-yellow-500 text-white p-3 rounded hover:bg-yellow-600 text-xl"
           >
             Check Date
           </button>
         </div>
       </div>
 
-      <div className="mb-4">
-        <label className="mr-2 font-medium">Repeat interval (minutes):</label>
+      <div className="mb-6">
+        <label className="mr-3 font-medium text-xl">Repeat interval (minutes):</label>
         <input
           type="number"
           value={intervalMinutes}
           onChange={(e) => setIntervalMinutes(Math.max(1, Number(e.target.value)))}
           min="1"
-          className="border p-2 rounded w-20"
+          className="border p-3 rounded w-20 text-xl"
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div>
-          <h2 className="text-xl font-semibold">DKS</h2>
-          <ul className="mt-2">
-            {dksNumbers.map((num, index) => (
-              <li key={index} className="flex items-center py-1">
-                <span className="mr-2">{num}</span>
+          <h2 className="text-2xl font-semibold">DRS</h2>
+          <ul className="mt-3">
+            {drsNumbers.map((num, index) => (
+              <li key={index} className="flex items-center py-2">
+                <span className="mr-3 text-3xl">{num}</span>
                 <button
-                  onClick={() => deleteNumber('DKS', index)}
-                  className="text-red-500 hover:text-red-700"
+                  onClick={() => deleteNumber('DRS', index)}
+                  className="text-red-500 hover:text-red-700 text-xl"
                 >
                   ✕
                 </button>
@@ -233,14 +271,14 @@ const App = () => {
         </div>
 
         <div>
-          <h2 className="text-xl font-semibold">Override</h2>
-          <ul className="mt-2">
+          <h2 className="text-2xl font-semibold">Override</h2>
+          <ul className="mt-3">
             {overrideNumbers.map((num, index) => (
-              <li key={index} className="flex items-center py-1">
-                <span className="mr-2">{num}</span>
+              <li key={index} className="flex items-center py-2">
+                <span className="mr-3 text-3xl">{num}</span>
                 <button
                   onClick={() => deleteNumber('Override', index)}
-                  className="text-red-500 hover:text-red-700"
+                  className="text-red-500 hover:text-red-700 text-xl"
                 >
                   ✕
                 </button>
@@ -250,14 +288,14 @@ const App = () => {
         </div>
 
         <div>
-          <h2 className="text-xl font-semibold">Check Date</h2>
-          <ul className="mt-2">
+          <h2 className="text-2xl font-semibold">Check Date</h2>
+          <ul className="mt-3">
             {checkDateNumbers.map((num, index) => (
-              <li key={index} className="flex items-center py-1">
-                <span className="mr-2">{num}</span>
+              <li key={index} className="flex items-center py-2">
+                <span className="mr-3 text-3xl">{num}</span>
                 <button
                   onClick={() => deleteNumber('Check Date', index)}
-                  className="text-red-500 hover:text-red-700"
+                  className="text-red-500 hover:text-red-700 text-xl"
                 >
                   ✕
                 </button>
