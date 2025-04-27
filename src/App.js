@@ -93,9 +93,12 @@ const App = () => {
     };
   }, [muted, announcedNumbers]);
 
-  // Handle keyboard input
+  // Handle keyboard input (only when input field is not focused)
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Ignore keydown events if the input field is focused
+      if (document.activeElement === inputRef.current) return;
+
       if (/^[0-9]$/.test(e.key)) {
         setInput(prev => prev + e.key);
       } else if (e.key === 'Backspace') {
@@ -221,7 +224,7 @@ const App = () => {
             {muted ? 'Unmute' : 'Mute'}
           </button>
           <button
-            onClick={() => handleButtonClick('DRS')}
+            onClickGIF => handleButtonClick('DRS')}
             className="bg-blue-500 text-white p-3 rounded hover:bg-blue-600 text-xl"
           >
             DRS
