@@ -17,7 +17,7 @@ const io = new Server(server, {
 
 // Store numbers on the server
 const numbers = {
-  DKS: [],
+  DRS: [],
   Override: [],
   'Check Date': []
 };
